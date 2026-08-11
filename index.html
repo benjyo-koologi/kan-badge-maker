@@ -283,6 +283,8 @@
   const A4 = {w:210, h:297};
   const LS_KEY = "a4circleprint.v2";
   const RULER_INSET = 8;   // 右下メモリの端からの余白(mm)。補正で数%伸びても紙内に収める。
+  const IMPORT_MAX_DIM = 900;    // 取り込み時に長辺をこのpxまで縮小（コンビニプリンタ+缶バッジ用途なら十分な解像度）
+  const IMPORT_JPEG_QUALITY = 0.85;
 
   const $ = s => document.querySelector(s);
   const el = {
@@ -484,22 +486,32 @@
   }
 
   // 画像
+  // 取り込み時にcreateImageBitmapで直接デコードし、長辺IMPORT_MAX_DIMpxまで縮小してJPEG化する。
+  // （元のiPhone写真の巨大なbase64を経由しないので、ピークメモリを抑えられる）
+  function downscaleToDataURL(bitmap, maxDim, quality){
+    const iw=bitmap.width, ih=bitmap.height;
+    const scale=Math.min(1, maxDim/Math.max(iw,ih));
+    const w=Math.max(1,Math.round(iw*scale)), h=Math.max(1,Math.round(ih*scale));
+    const canvas=document.createElement("canvas"); canvas.width=w; canvas.height=h;
+    const ctx=canvas.getContext("2d");
+    ctx.fillStyle="#fff"; ctx.fillRect(0,0,w,h);
+    ctx.drawImage(bitmap,0,0,w,h);
+    return { src:canvas.toDataURL("image/jpeg",quality), aspect:iw/ih };
+  }
   function addFiles(files){
     const arr=Array.from(files).filter(f=>/^image\/(jpeg|png|webp)$/.test(f.type));
     let remaining=arr.length; if(!remaining) return;
     arr.forEach(f=>{
-      const reader=new FileReader();
-      reader.onload=ev=>{
-        const src=ev.target.result; const probe=new Image();
-        probe.onload=()=>{
-          const id="img_"+Date.now()+"_"+Math.random().toString(36).slice(2,7);
-          images.push({id,src,aspect:probe.naturalWidth/probe.naturalHeight});
-          if(!defaultImageId) defaultImageId=id;
-          remaining--; renderImgList(); if(remaining===0){ requestDistribute(); render(); }
-        };
-        probe.src=src;
-      };
-      reader.readAsDataURL(f);
+      createImageBitmap(f).then(bitmap=>{
+        const {src,aspect}=downscaleToDataURL(bitmap, IMPORT_MAX_DIM, IMPORT_JPEG_QUALITY);
+        if(bitmap.close) bitmap.close();
+        const id="img_"+Date.now()+"_"+Math.random().toString(36).slice(2,7);
+        images.push({id,src,aspect});
+        if(!defaultImageId) defaultImageId=id;
+        remaining--; renderImgList(); if(remaining===0){ requestDistribute(); render(); }
+      }).catch(()=>{
+        remaining--; renderImgList(); if(remaining===0){ requestDistribute(); render(); }
+      });
     });
   }
   function renderImgList(){
