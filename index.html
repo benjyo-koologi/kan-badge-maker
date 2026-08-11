@@ -82,12 +82,9 @@
 
   .imglist{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
   .thumb{position:relative;width:60px;height:60px;border-radius:8px;overflow:hidden;border:2px solid var(--line);background:#f0eee8;cursor:pointer;}
-  .thumb.on{border-color:var(--accent);}
   .thumb img{width:100%;height:100%;object-fit:cover;}
   .thumb .x{position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:12px;line-height:18px;text-align:center;border:none;cursor:pointer;}
-  .thumb .apply{position:absolute;bottom:2px;left:2px;right:2px;font-size:9px;padding:2px 0;border:none;background:rgba(43,111,106,.9);color:#fff;border-radius:4px;cursor:pointer;}
 
-  #adjustSec .selinfo{font-size:11px;color:var(--sub);margin-bottom:8px;}
   .padgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;max-width:150px;margin:0 auto;}
   .padgrid .btn{padding:8px 0;}
 
@@ -101,13 +98,27 @@
 
   .circle{position:absolute;}
   .circle .clip{position:absolute;inset:0;border-radius:50%;overflow:hidden;background:#f4f2ec;}
-  .circle .clip img{position:absolute;left:50%;top:50%;transform-origin:center center;will-change:transform;-webkit-user-drag:none;user-select:none;pointer-events:none;}
+  .circle .clip img{position:absolute;left:50%;top:50%;transform-origin:center center;-webkit-user-drag:none;user-select:none;pointer-events:none;}
   .circle .guide{position:absolute;inset:0;border-radius:50%;box-sizing:border-box;pointer-events:none;}
   .circle .finishguide{position:absolute;border-radius:50%;box-sizing:border-box;pointer-events:none;}
   .circle .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#c3bdb0;font-size:10px;}
-  .circle.sel .clip{outline:2px solid var(--accent);outline-offset:1px;}
-  .circle .selbadge{position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:var(--accent);color:#fff;font-size:9px;padding:1px 6px;border-radius:8px;white-space:nowrap;}
-  .circle:not(.sel) .selbadge{display:none;}
+
+  /* 全画面編集オーバーレイ: 編集中は1枚だけを大きく表示する。
+     常時12個をアクティブなレイヤーにしないことで、モバイルでの負荷を抑える。 */
+  .editor{position:fixed;inset:0;background:rgba(20,18,16,.92);z-index:50;display:none;flex-direction:column;}
+  .editor.open{display:flex;}
+  .editor-top{display:flex;align-items:center;gap:8px;padding:12px 14px;color:#fff;}
+  .editor-top .editor-title{flex:1;text-align:center;font-size:13px;font-weight:600;}
+  .editor-top .btn{color:#fff;border-color:rgba(255,255,255,.3);background:rgba(255,255,255,.08);}
+  .editor-top .btn:hover{background:rgba(255,255,255,.16);}
+  .editor-stage{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none;}
+  #editorCircle{transform-origin:center center;}
+  .editor-controls{padding:10px 14px 22px;}
+  .editor-controls .row{justify-content:center;color:#fff;}
+  .editor-controls .row span{color:rgba(255,255,255,.8);}
+  .editor-controls .btn{color:#fff;border-color:rgba(255,255,255,.3);background:rgba(255,255,255,.08);}
+  .editor-controls .btn:hover{background:rgba(255,255,255,.16);}
+  .editor-controls .hint{text-align:center;color:rgba(255,255,255,.6);}
 
   /* 右下の100mm実寸メモリ（補正レイヤー内）*/
   .ruler{position:absolute;pointer-events:none;}
@@ -143,7 +154,7 @@
         <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
         <button class="btn full" id="addImgBtn">画像を追加</button>
         <div class="imglist" id="imgList"></div>
-        <p class="hint">JPEG / PNG / WebP 対応。サムネイルクリック（または内の「全円へ」）で、その画像をすべての円に割り当てられます。</p>
+        <p class="hint">JPEG / PNG / WebP 対応。サムネイルをクリックすると、その画像を大きく表示して配置調整ができます。</p>
         <div class="row" style="margin-top:10px;">
           <label class="fld"><span class="lab">同じ画像の枚数</span><input id="copiesPerImage" type="number" min="1" max="99" step="1" value="2"></label>
           <button class="btn sm" id="autoAssignBtn" style="align-self:flex-end;">再割り当て</button>
@@ -236,29 +247,6 @@
       </div>
     </details>
 
-    <details class="sec" id="adjustSec">
-      <summary>選択中の円を調整 <span class="chev">›</span></summary>
-      <div class="sec-body">
-        <p class="selinfo" id="selInfo">プレビューで円をクリック / タップすると、その円の画像を調整できます。</p>
-        <label class="fld" style="margin-bottom:9px;"><span class="lab">この円の画像</span><select id="cellImgSel"></select></label>
-        <div class="row"><span style="font-size:11px;color:var(--sub);font-weight:600;">拡大 / 縮小</span>
-          <div style="margin-left:auto;display:flex;gap:6px;"><button class="btn sm" data-adj="zoomout">－</button><button class="btn sm" data-adj="zoomin">＋</button></div>
-        </div>
-        <div class="row"><span style="font-size:11px;color:var(--sub);font-weight:600;">回転</span>
-          <div style="margin-left:auto;display:flex;gap:6px;"><button class="btn sm" data-adj="rotl">⟲ 15°</button><button class="btn sm" data-adj="rotr">15° ⟳</button></div>
-        </div>
-        <div style="margin:8px 0;"><span style="font-size:11px;color:var(--sub);font-weight:600;">位置</span>
-          <div class="padgrid" style="margin-top:6px;">
-            <span></span><button class="btn sm" data-adj="up">▲</button><span></span>
-            <button class="btn sm" data-adj="left">◀</button><button class="btn sm" data-adj="reset">中央</button><button class="btn sm" data-adj="right">▶</button>
-            <span></span><button class="btn sm" data-adj="down">▼</button><span></span>
-          </div>
-        </div>
-        <p class="hint">プレビュー上で直接ドラッグ / ピンチ操作もできます（PC・iPad対応）。</p>
-        <button class="btn full" id="applyAllBtn" style="margin-top:6px;">この画像と調整をすべての円へ適用</button>
-      </div>
-    </details>
-
     <div style="margin-top:14px;display:flex;gap:8px;">
       <button class="btn" id="resetAllBtn" style="flex:1;">設定リセット</button>
     </div>
@@ -281,6 +269,34 @@
   </main>
 </div>
 
+<div class="editor no-print" id="editorOverlay">
+  <div class="editor-top">
+    <button class="btn sm" id="editorPrevBtn">◀ 前</button>
+    <div class="editor-title" id="editorTitle">画像</div>
+    <button class="btn sm" id="editorNextBtn">次 ▶</button>
+    <button class="btn primary sm" id="editorDoneBtn">完了</button>
+  </div>
+  <div class="editor-stage" id="editorStage">
+    <div class="circle" id="editorCircle" style="position:relative;"></div>
+  </div>
+  <div class="editor-controls">
+    <div class="row">
+      <span>拡大 / 縮小</span>
+      <div style="display:flex;gap:6px;"><button class="btn sm" data-eadj="zoomout">－</button><button class="btn sm" data-eadj="zoomin">＋</button></div>
+    </div>
+    <div class="row">
+      <span>回転</span>
+      <div style="display:flex;gap:6px;"><button class="btn sm" data-eadj="rotl">⟲ 15°</button><button class="btn sm" data-eadj="rotr">15° ⟳</button></div>
+    </div>
+    <div class="padgrid" style="margin-top:8px;">
+      <span></span><button class="btn sm" data-eadj="up">▲</button><span></span>
+      <button class="btn sm" data-eadj="left">◀</button><button class="btn sm" data-eadj="reset">中央</button><button class="btn sm" data-eadj="right">▶</button>
+      <span></span><button class="btn sm" data-eadj="down">▼</button><span></span>
+    </div>
+    <p class="hint">ドラッグ / ピンチ操作もできます。</p>
+  </div>
+</div>
+
 <script>
 "use strict";
 (function(){
@@ -296,7 +312,7 @@
   const el = {
     paper:$("#paper"), layer:$("#layer"), viewport:$("#viewport"), pageRule:$("#pageRule"),
     stat:$("#statBox"), corrStat:$("#corrStat"), imgList:$("#imgList"), fileInput:$("#fileInput"),
-    profileSel:$("#profileSel"), cellImgSel:$("#cellImgSel"), selInfo:$("#selInfo"), notice:$("#noticeArea"),
+    profileSel:$("#profileSel"), notice:$("#noticeArea"),
   };
 
   function defaults(){
@@ -310,13 +326,15 @@
   }
   let S = defaults();
   let images = [];
-  let defaultImageId = null;
   let cells = [];
-  let selected = -1;
   let layout = {cols:0, rows:0, total:0, positions:[]};
   let pscale = 1;
   let pendingDistribute = false;
   function requestDistribute(){ pendingDistribute = true; }
+
+  // 全画面編集（画像単位で1枚だけを大きく表示して調整する）
+  let editorIndex = -1;
+  let editorScale = 1;
 
   // 補正: 係数を直接保持（掛け合わせ式）
   let corr = { activeId:"none", profiles:[ {id:"none", name:"補正なし", fx:1, fy:1} ] };
@@ -361,10 +379,10 @@
   function syncCells(){
     const total=layout.total; const next=[];
     for(let i=0;i<total;i++){
-      next[i] = cells[i] || {imageId:null, tx:0, ty:0, scale:1, rot:0};
+      next[i] = cells[i] || {imageId:null};
       if(next[i].imageId && !images.some(im=>im.id===next[i].imageId)) next[i].imageId = null;
     }
-    cells=next; if(selected>=total) selected=-1;
+    cells=next;
   }
 
   // 「同じ画像の枚数」に従い、先頭の画像から順に cells へ imageId を割り当て直す
@@ -405,30 +423,32 @@
     const d=S.diameter;
     layout.positions.forEach((pos,idx)=>{
       const c=document.createElement("div");
-      c.className="circle"+(idx===selected?" sel":"");
+      c.className="circle";
       c.style.left=pos.left+"mm"; c.style.top=pos.top+"mm"; c.style.width=d+"mm"; c.style.height=d+"mm";
-      c.dataset.idx=idx;
       const clip=document.createElement("div"); clip.className="clip";
       const cell=cells[idx]; const img=images.find(im=>im.id===cell.imageId);
-      if(img){ const im=document.createElement("img"); im.src=img.src; applyImgStyle(im,img,cell,d); clip.appendChild(im); }
+      if(img){ const im=document.createElement("img"); im.src=img.src; im.dataset.imgid=img.id; applyImgStyle(im,img,d); clip.appendChild(im); }
       else{ const e=document.createElement("div"); e.className="empty"; e.textContent="画像なし"; clip.appendChild(e); }
       c.appendChild(clip);
-      if(S.guide.on){ const g=document.createElement("div"); g.className="guide"; g.style.border=S.guide.weight+"mm "+S.guide.style+" "+S.guide.color; c.appendChild(g); }
-      if(S.finishGuide.on && S.finishGuide.diameter>0){
-        const fd=Math.min(S.finishGuide.diameter, d); const off=(d-fd)/2;
-        const fg=document.createElement("div"); fg.className="finishguide";
-        fg.style.left=off+"mm"; fg.style.top=off+"mm"; fg.style.width=fd+"mm"; fg.style.height=fd+"mm";
-        fg.style.border="0.3mm dashed #2b6f6a";
-        c.appendChild(fg);
-      }
-      const badge=document.createElement("div"); badge.className="selbadge"; badge.textContent="調整中"; c.appendChild(badge);
-      attachGestures(c,idx);
+      addGuideOverlays(c, d);
       el.layer.appendChild(c);
     });
 
     if(S.ruler) addRuler(pm);
 
-    updateStat(); updateCorrStat(); updateNotice(); updateSelUI();
+    updateStat(); updateCorrStat(); updateNotice();
+  }
+
+  // カットガイド／仕上がりサイズガイドを円のコンテナに追加する（グリッド・編集画面の両方から使う）
+  function addGuideOverlays(container, d){
+    if(S.guide.on){ const g=document.createElement("div"); g.className="guide"; g.style.border=S.guide.weight+"mm "+S.guide.style+" "+S.guide.color; container.appendChild(g); }
+    if(S.finishGuide.on && S.finishGuide.diameter>0){
+      const fd=Math.min(S.finishGuide.diameter, d); const off=(d-fd)/2;
+      const fg=document.createElement("div"); fg.className="finishguide";
+      fg.style.left=off+"mm"; fg.style.top=off+"mm"; fg.style.width=fd+"mm"; fg.style.height=fd+"mm";
+      fg.style.border="0.3mm dashed #2b6f6a";
+      container.appendChild(fg);
+    }
   }
 
   function addRuler(pm){
@@ -454,16 +474,19 @@
     el.layer.appendChild(ruler);
   }
 
-  function applyImgStyle(im,imgObj,cell,d){
-    const r=imgObj.aspect||1; let w,h;
+  // 位置・拡大・回転は画像オブジェクト自身(tx/ty/scale/rot)が持つ。同じ画像を使う全マスが同じ見た目になる。
+  function applyImgStyle(im,img,d){
+    const r=img.aspect||1; let w,h;
     if(r>=1){h=d;w=d*r;}else{w=d;h=d/r;}
     im.style.width=w+"mm"; im.style.height=h+"mm";
-    im.style.transform="translate(-50%,-50%) translate("+cell.tx+"mm,"+cell.ty+"mm) rotate("+cell.rot+"deg) scale("+cell.scale+")";
+    im.style.transform="translate(-50%,-50%) translate("+img.tx+"mm,"+img.ty+"mm) rotate("+img.rot+"deg) scale("+img.scale+")";
   }
-  function refreshCell(idx){
-    const node=el.layer.querySelector('.circle[data-idx="'+idx+'"] .clip img');
-    const cell=cells[idx]; const img=images.find(im=>im.id===cell.imageId);
-    if(node&&img) applyImgStyle(node,img,cell,S.diameter);
+  // 編集画面は非表示のグリッドに影響しないので、編集終了時にまとめて反映する
+  function refreshAllGridImages(){
+    el.layer.querySelectorAll(".clip img[data-imgid]").forEach(node=>{
+      const img=images.find(im=>im.id===node.dataset.imgid);
+      if(img) applyImgStyle(node,img,S.diameter);
+    });
   }
 
   function updateStat(){
@@ -512,8 +535,7 @@
         const {src,aspect}=downscaleToDataURL(bitmap, IMPORT_MAX_DIM, IMPORT_JPEG_QUALITY);
         if(bitmap.close) bitmap.close();
         const id="img_"+Date.now()+"_"+Math.random().toString(36).slice(2,7);
-        images.push({id,src,aspect});
-        if(!defaultImageId) defaultImageId=id;
+        images.push({id,src,aspect,tx:0,ty:0,scale:1,rot:0});
         remaining--; renderImgList(); if(remaining===0){ requestDistribute(); render(); }
       }).catch(()=>{
         remaining--; renderImgList(); if(remaining===0){ requestDistribute(); render(); }
@@ -523,95 +545,104 @@
   function renderImgList(){
     el.imgList.innerHTML="";
     images.forEach(img=>{
-      const t=document.createElement("div"); t.className="thumb"+(img.id===defaultImageId?" on":"");
+      const t=document.createElement("div"); t.className="thumb";
       const im=document.createElement("img"); im.src=img.src; t.appendChild(im);
       const x=document.createElement("button"); x.className="x"; x.textContent="×"; x.title="この画像を削除";
       x.onclick=e=>{e.stopPropagation();removeImage(img.id);}; t.appendChild(x);
-      const ap=document.createElement("button"); ap.className="apply"; ap.textContent="全円へ";
-      ap.onclick=e=>{e.stopPropagation();assignAll(img.id);}; t.appendChild(ap);
-      t.onclick=()=>{ defaultImageId=img.id; assignAll(img.id); };
+      t.onclick=()=>openEditor(img.id);
       el.imgList.appendChild(t);
     });
-    fillCellImgSelect();
   }
-  function assignAll(id){ defaultImageId=id; cells.forEach(c=>{c.imageId=id;}); renderImgList(); render(); }
   function removeImage(id){
     images=images.filter(im=>im.id!==id);
-    if(defaultImageId===id) defaultImageId=images.length?images[0].id:null;
     requestDistribute();
     renderImgList(); render();
   }
-  function fillCellImgSelect(){
-    el.cellImgSel.innerHTML="";
-    const none=document.createElement("option"); none.value=""; none.textContent="（画像なし）"; el.cellImgSel.appendChild(none);
-    images.forEach((img,i)=>{ const o=document.createElement("option"); o.value=img.id; o.textContent="画像 "+(i+1); el.cellImgSel.appendChild(o); });
-    if(selected>=0 && cells[selected]) el.cellImgSel.value=cells[selected].imageId||"";
-  }
 
-  // 選択・調整
-  function selectCell(idx){
-    selected=idx;
-    document.querySelectorAll(".circle").forEach(c=>c.classList.toggle("sel", +c.dataset.idx===idx));
-    const sec=$("#adjustSec"); if(sec && !sec.open) sec.open=true;
-    updateSelUI();
-  }
-  function updateSelUI(){
-    if(selected<0 || !cells[selected]) el.selInfo.textContent="プレビューで円をクリック / タップすると、その円の画像を調整できます。";
-    else{ const c=cells[selected]; el.selInfo.textContent="選択中: "+(selected+1)+" 番目 ／ 倍率 "+c.scale.toFixed(2)+" ／ 回転 "+Math.round(c.rot)+"°"; }
-    fillCellImgSelect();
-  }
+  // 全画面編集: 1枚の画像だけを大きく表示して拡大/回転/位置を調整する。
+  // グリッド側は編集中触らず、閉じた時にまとめて反映するので、同時に動くレイヤーは常に1枚だけ。
   const MOVE_MM=1.5, ZOOM_STEP=0.1, ROT_STEP=15;
-  function adjust(kind){
-    if(selected<0) return; const c=cells[selected];
+  function adjustImage(img,kind){
     switch(kind){
-      case "zoomin": c.scale=Math.min(8,c.scale*(1+ZOOM_STEP)); break;
-      case "zoomout": c.scale=Math.max(0.2,c.scale/(1+ZOOM_STEP)); break;
-      case "rotl": c.rot-=ROT_STEP; break;
-      case "rotr": c.rot+=ROT_STEP; break;
-      case "up": c.ty-=MOVE_MM; break;
-      case "down": c.ty+=MOVE_MM; break;
-      case "left": c.tx-=MOVE_MM; break;
-      case "right": c.tx+=MOVE_MM; break;
-      case "reset": c.tx=0;c.ty=0;c.scale=1;c.rot=0; break;
+      case "zoomin": img.scale=Math.min(8,img.scale*(1+ZOOM_STEP)); break;
+      case "zoomout": img.scale=Math.max(0.2,img.scale/(1+ZOOM_STEP)); break;
+      case "rotl": img.rot-=ROT_STEP; break;
+      case "rotr": img.rot+=ROT_STEP; break;
+      case "up": img.ty-=MOVE_MM; break;
+      case "down": img.ty+=MOVE_MM; break;
+      case "left": img.tx-=MOVE_MM; break;
+      case "right": img.tx+=MOVE_MM; break;
+      case "reset": img.tx=0;img.ty=0;img.scale=1;img.rot=0; break;
     }
-    refreshCell(selected); updateSelUI();
+    refreshEditorImage();
   }
-  function attachGestures(node,idx){
+  function refreshEditorImage(){
+    const img=images[editorIndex]; const im=$("#editorCircle .clip img");
+    if(img&&im) applyImgStyle(im,img,S.diameter);
+  }
+  function attachEditorGestures(node,img){
     const pointers=new Map(); let start=null;
-    node.addEventListener("pointerdown",e=>{
-      selectCell(idx); node.setPointerCapture(e.pointerId);
+    node.onpointerdown=e=>{
+      node.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
-      if(pointers.size===1){ const c=cells[idx]; start={mode:"pan",x:e.clientX,y:e.clientY,tx:c.tx,ty:c.ty}; }
+      if(pointers.size===1){ start={mode:"pan",x:e.clientX,y:e.clientY,tx:img.tx,ty:img.ty}; }
       else if(pointers.size===2){
         const p=[...pointers.values()];
         const dist=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);
         const ang=Math.atan2(p[1].y-p[0].y,p[1].x-p[0].x)*180/Math.PI;
-        const c=cells[idx]; start={mode:"pinch",dist,ang,scale:c.scale,rot:c.rot};
+        start={mode:"pinch",dist,ang,scale:img.scale,rot:img.rot};
       }
       e.preventDefault();
-    });
-    node.addEventListener("pointermove",e=>{
+    };
+    node.onpointermove=e=>{
       if(!pointers.has(e.pointerId)) return;
       pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
-      const c=cells[idx];
       if(start&&start.mode==="pan"&&pointers.size===1){
-        const k=1/(pscale*PX_PER_MM);
-        c.tx=start.tx+(e.clientX-start.x)*k; c.ty=start.ty+(e.clientY-start.y)*k; refreshCell(idx);
+        const k=1/(editorScale*PX_PER_MM);
+        img.tx=start.tx+(e.clientX-start.x)*k; img.ty=start.ty+(e.clientY-start.y)*k; refreshEditorImage();
       }else if(start&&start.mode==="pinch"&&pointers.size>=2){
         const p=[...pointers.values()];
         const dist=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);
         const ang=Math.atan2(p[1].y-p[0].y,p[1].x-p[0].x)*180/Math.PI;
-        c.scale=Math.min(8,Math.max(0.2,start.scale*(dist/start.dist)));
-        c.rot=start.rot+(ang-start.ang); refreshCell(idx);
+        img.scale=Math.min(8,Math.max(0.2,start.scale*(dist/start.dist)));
+        img.rot=start.rot+(ang-start.ang); refreshEditorImage();
       }
-    });
-    function up(e){ if(pointers.has(e.pointerId)) pointers.delete(e.pointerId); if(pointers.size<2) start=null; updateSelUI(); }
-    node.addEventListener("pointerup",up); node.addEventListener("pointercancel",up);
-    node.addEventListener("wheel",e=>{
-      selectCell(idx); const c=cells[idx];
-      c.scale=Math.min(8,Math.max(0.2,c.scale*(e.deltaY<0?1.08:1/1.08)));
-      refreshCell(idx); updateSelUI(); e.preventDefault();
-    },{passive:false});
+    };
+    function up(e){ if(pointers.has(e.pointerId)) pointers.delete(e.pointerId); if(pointers.size<2) start=null; }
+    node.onpointerup=up; node.onpointercancel=up;
+    node.onwheel=e=>{
+      img.scale=Math.min(8,Math.max(0.2,img.scale*(e.deltaY<0?1.08:1/1.08)));
+      refreshEditorImage(); e.preventDefault();
+    };
+  }
+  function computeEditorScale(){
+    const stage=$("#editorStage");
+    const availW=Math.max(120, stage.clientWidth-40), availH=Math.max(120, stage.clientHeight-40);
+    const dPx=S.diameter*PX_PER_MM;
+    editorScale=Math.min(availW/dPx, availH/dPx, 6);
+    $("#editorCircle").style.transform="scale("+editorScale+")";
+  }
+  function renderEditorImage(){
+    const img=images[editorIndex]; if(!img) return;
+    const host=$("#editorCircle"); host.innerHTML="";
+    const d=S.diameter; host.style.width=d+"mm"; host.style.height=d+"mm";
+    const clip=document.createElement("div"); clip.className="clip"; host.appendChild(clip);
+    const im=document.createElement("img"); im.src=img.src; im.style.willChange="transform";
+    applyImgStyle(im,img,d); clip.appendChild(im);
+    addGuideOverlays(host, d);
+    attachEditorGestures(host,img);
+    $("#editorTitle").textContent="画像 "+(editorIndex+1)+" / "+images.length;
+    computeEditorScale();
+  }
+  function openEditor(imageId){
+    editorIndex=images.findIndex(im=>im.id===imageId); if(editorIndex<0) return;
+    $("#editorOverlay").classList.add("open");
+    renderEditorImage();
+  }
+  function closeEditor(){
+    $("#editorOverlay").classList.remove("open");
+    editorIndex=-1;
+    refreshAllGridImages();
   }
 
   // 印刷 / PDF
@@ -676,16 +707,13 @@
 
     $("#tbPrint").onclick=doPrint;
 
-    document.querySelectorAll("[data-adj]").forEach(b=>{ b.onclick=()=>adjust(b.dataset.adj); });
-    el.cellImgSel.onchange=e=>{ if(selected<0) return; cells[selected].imageId=e.target.value||null; render(); };
-    $("#applyAllBtn").onclick=()=>{
-      if(selected<0) return; const s=cells[selected];
-      cells.forEach(c=>{ c.imageId=s.imageId; c.tx=s.tx; c.ty=s.ty; c.scale=s.scale; c.rot=s.rot; });
-      if(s.imageId) defaultImageId=s.imageId; renderImgList(); render();
-    };
+    document.querySelectorAll("[data-eadj]").forEach(b=>{ b.onclick=()=>{ if(editorIndex>=0) adjustImage(images[editorIndex], b.dataset.eadj); }; });
+    $("#editorPrevBtn").onclick=()=>{ if(images.length){ editorIndex=(editorIndex-1+images.length)%images.length; renderEditorImage(); } };
+    $("#editorNextBtn").onclick=()=>{ if(images.length){ editorIndex=(editorIndex+1)%images.length; renderEditorImage(); } };
+    $("#editorDoneBtn").onclick=closeEditor;
     $("#resetAllBtn").onclick=resetAll;
 
-    window.addEventListener("resize",()=>computePscale());
+    window.addEventListener("resize",()=>{ computePscale(); if($("#editorOverlay").classList.contains("open")) computeEditorScale(); });
   }
 
   // 補正（掛け合わせ式）
@@ -736,9 +764,10 @@
   function resetAll(){
     if(!confirm("配置・ガイド・画像調整を初期設定に戻します（読み込んだ画像と補正プロファイルは残ります）。よろしいですか？")) return;
     S=defaults();
-    cells=cells.map(()=>({imageId:null,tx:0,ty:0,scale:1,rot:0}));
+    images.forEach(img=>{ img.tx=0; img.ty=0; img.scale=1; img.rot=0; });
+    cells=[];
     requestDistribute();
-    selected=-1; save(); bindUI(); render();
+    save(); bindUI(); render();
   }
 
   $("#verTag").textContent = "Ver."+APP_VERSION;
