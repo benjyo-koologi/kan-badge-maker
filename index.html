@@ -132,7 +132,7 @@
 
 <div class="app">
   <aside class="panel no-print">
-    <div class="brand"><h1>A4 円形印刷ツール</h1><span class="tag">実寸印刷</span></div>
+    <div class="brand"><h1>A4 円形印刷ツール</h1><span class="tag">実寸印刷</span><span class="tag" id="verTag"></span></div>
     <p class="lede">指定した直径の円を、印刷後の紙面でも正確な寸法で出力します。右下の100mm目盛りを測って、ずれていれば補正してください。</p>
 
     <div id="noticeArea"></div>
@@ -262,6 +262,11 @@
     <div style="margin-top:14px;display:flex;gap:8px;">
       <button class="btn" id="resetAllBtn" style="flex:1;">設定リセット</button>
     </div>
+
+    <div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px;">
+      <img src="logo.png" alt="logo" style="width:28px;height:28px;border-radius:6px;object-fit:cover;flex-shrink:0;">
+      <span style="font-size:11px;color:var(--sub);">© 2026 Chloe's Grrrl Works</span>
+    </div>
   </aside>
 
   <main class="stage">
@@ -285,6 +290,7 @@
   const RULER_INSET = 8;   // 右下メモリの端からの余白(mm)。補正で数%伸びても紙内に収める。
   const IMPORT_MAX_DIM = 900;    // 取り込み時に長辺をこのpxまで縮小（コンビニプリンタ+缶バッジ用途なら十分な解像度）
   const IMPORT_JPEG_QUALITY = 0.85;
+  const APP_VERSION = "1.00";
 
   const $ = s => document.querySelector(s);
   const el = {
@@ -735,6 +741,7 @@
     selected=-1; save(); bindUI(); render();
   }
 
+  $("#verTag").textContent = "Ver."+APP_VERSION;
   load(); bindUI(); render();
 })();
 </script>
