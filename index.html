@@ -11,7 +11,7 @@
      - #paper は実寸(mm)。画面では scale(--pscale) で縮小表示、印刷時は解除して実寸。
      - #layer には印刷補正 --corr(scaleX/scaleY) を掛ける（印刷時／プレビュー反映ON時）。
        → 円・画像・ガイド・実寸メモリすべてに一括で補正が掛かる。
-     - 右下の100mmメモリも #layer の中にあるので、
+     - 右上の100mmメモリも #layer の中にあるので、
        「メモリを測る＝実際の印刷精度を測る」ことになり、補正の検証も同時にできる。
      - 補正係数は掛け合わせ式: 新係数 = 旧係数 × (100 / 実測値)。
        → 補正済みの紙を測って入力しても収束するだけで壊れない。
@@ -120,7 +120,7 @@
   .editor-controls .btn:hover{background:rgba(255,255,255,.16);}
   .editor-controls .hint{text-align:center;color:rgba(255,255,255,.6);}
 
-  /* 右下の100mm実寸メモリ（補正レイヤー内）*/
+  /* 右上の100mm実寸メモリ（補正レイヤー内）*/
   .ruler{position:absolute;pointer-events:none;}
   .ruler .ln{position:absolute;background:#3a3a3a;}
   .ruler .tk{position:absolute;background:#3a3a3a;}
@@ -144,7 +144,7 @@
 <div class="app">
   <aside class="panel no-print">
     <div class="brand"><h1>A4 円形印刷ツール</h1><span class="tag">実寸印刷</span><span class="tag" id="verTag"></span></div>
-    <p class="lede">指定した直径の円を、印刷後の紙面でも正確な寸法で出力します。右下の100mm目盛りを測って、ずれていれば補正してください。</p>
+    <p class="lede">指定した直径の円を、印刷後の紙面でも正確な寸法で出力します。右上の100mm目盛りを測って、ずれていれば補正してください。</p>
 
     <div id="noticeArea"></div>
 
@@ -222,7 +222,7 @@
     <details class="sec" open>
       <summary>印刷補正 <span class="chev">›</span></summary>
       <div class="sec-body">
-        <label class="toggle" style="margin-bottom:10px;"><input type="checkbox" id="rulerOn" checked> 右下に100mm実寸メモリを印刷</label>
+        <label class="toggle" style="margin-bottom:10px;"><input type="checkbox" id="rulerOn" checked> 右上に100mm実寸メモリを印刷</label>
 
         <label class="fld" style="margin-bottom:8px;"><span class="lab">プリンタープロファイル</span><select id="profileSel"></select></label>
         <div class="row">
@@ -233,7 +233,7 @@
 
         <div class="stat" id="corrStat" style="margin:10px 0;"></div>
 
-        <p class="hint" style="margin-top:0;">印刷して右下の目盛りを定規で測り、実測値（mm）を入力してください。100mmちょうどなら補正不要です。</p>
+        <p class="hint" style="margin-top:0;">印刷して右上の目盛りを定規で測り、実測値（mm）を入力してください。100mmちょうどなら補正不要です。</p>
         <div class="grid2" style="margin-top:8px;">
           <label class="fld"><span class="lab">横 実測（mm）</span><input id="measX" type="number" min="50" max="150" step="0.1" placeholder="例: 99.0"></label>
           <label class="fld"><span class="lab">縦 実測（mm）</span><input id="measY" type="number" min="50" max="150" step="0.1" placeholder="例: 101.0"></label>
@@ -303,10 +303,10 @@
   const PX_PER_MM = 96/25.4;
   const A4 = {w:210, h:297};
   const LS_KEY = "a4circleprint.v2";
-  const RULER_INSET = 8;   // 右下メモリの端からの余白(mm)。補正で数%伸びても紙内に収める。
+  const RULER_INSET = 8;   // 右上メモリの端からの余白(mm)。補正で数%伸びても紙内に収める。
   const IMPORT_MAX_DIM = 900;    // 取り込み時に長辺をこのpxまで縮小（コンビニプリンタ+缶バッジ用途なら十分な解像度）
   const IMPORT_JPEG_QUALITY = 0.85;
-  const APP_VERSION = "1.02";
+  const APP_VERSION = "1.03";
 
   const $ = s => document.querySelector(s);
   const el = {
@@ -452,22 +452,24 @@
   }
 
   function addRuler(pm){
-    // 右下コーナーを基点に、横100mm・縦100mmのL字メモリ（補正レイヤー内 = 実際の印刷寸法）
+    // 右上コーナーを基点に、横100mm・縦100mmのL字メモリ（補正レイヤー内 = 実際の印刷寸法）
+    // ※iOSの「共有シートからPDFを作成」だと下端付近が見切れる端末があるため、上端基準にしている。
+    //   ここはページ内の描画位置を変えるだけで、寸法（@page・円のmm）自体は一切変えていない。
     const ox = pm.w - RULER_INSET;   // 右端X
-    const oy = pm.h - RULER_INSET;   // 下端Y
+    const oy = RULER_INSET;          // 上端Y
     const ruler=document.createElement("div"); ruler.className="ruler";
     ruler.style.left="0"; ruler.style.top="0"; ruler.style.width="100%"; ruler.style.height="100%";
 
     function line(x,y,w,h){ const n=document.createElement("div"); n.className="ln"; n.style.left=x+"mm"; n.style.top=y+"mm"; n.style.width=w+"mm"; n.style.height=h+"mm"; ruler.appendChild(n); }
     function tick(x,y,dir){ const n=document.createElement("div"); n.className="tk"; if(dir==="v"){n.style.left=x+"mm";n.style.top=(y-2)+"mm";n.style.width="0.3mm";n.style.height="4mm";}else{n.style.left=(x-2)+"mm";n.style.top=y+"mm";n.style.width="4mm";n.style.height="0.3mm";} ruler.appendChild(n); }
 
-    // 横100mm（下端に沿って、右端から左へ）※文字ラベルは入れない（円と重なるため）
+    // 横100mm（上端に沿って、右端から左へ）※文字ラベルは入れない（円と重なるため）
     const hx0 = ox-100, hx1 = ox;
     line(hx0, oy, 100, 0.3);
     tick(hx0, oy, "v"); tick(hx1, oy, "v");
 
-    // 縦100mm（右端に沿って、下端から上へ）
-    const vy0 = oy-100, vy1 = oy;
+    // 縦100mm（右端に沿って、上端から下へ）
+    const vy0 = oy, vy1 = oy+100;
     line(ox, vy0, 0.3, 100);
     tick(ox, vy0, "h"); tick(ox, vy1, "h");
 
@@ -510,7 +512,7 @@
     let html='<div class="notice">正確な寸法で印刷するため、プリンター（またはPDF保存）の倍率は必ず<b>100%</b>にしてください。「用紙に合わせる」等の自動縮小はオフ。</div>';
     const f=factors();
     if(Math.abs(f.fx-1)<1e-9 && Math.abs(f.fy-1)<1e-9)
-      html+='<div class="notice calm">まず一度印刷し、右下の100mm目盛りを定規で測ってください。ずれていれば実測値を入力して補正します。</div>';
+      html+='<div class="notice calm">まず一度印刷し、右上の100mm目盛りを定規で測ってください。ずれていれば実測値を入力して補正します。</div>';
     el.notice.innerHTML=html;
   }
 
@@ -732,7 +734,7 @@
     save(); fillProfileSelect(); render();
     $("#measX").value=""; $("#measY").value="";
     const f=factors();
-    alert("補正を更新しました。\n横補正係数 "+f.fx.toFixed(5)+" / 縦補正係数 "+f.fy.toFixed(5)+"\n\nもう一度印刷し、右下の目盛りが100mmになっているか確認してください。");
+    alert("補正を更新しました。\n横補正係数 "+f.fx.toFixed(5)+" / 縦補正係数 "+f.fy.toFixed(5)+"\n\nもう一度印刷し、右上の目盛りが100mmになっているか確認してください。");
   }
   function resetCorrection(){
     const p=activeProfile();
