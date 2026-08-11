@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>A4 円形印刷ツール</title>
+<style>
+  /* ============================================================
+     設計思想:
+     - すべての寸法は mm で管理する（A4=210x297mm、円の直径もmm）。
+     - #paper は実寸(mm)。画面では scale(--pscale) で縮小表示、印刷時は解除して実寸。
+     - #layer には印刷補正 --corr(scaleX/scaleY) を掛ける（印刷時／プレビュー反映ON時）。
+       → 円・画像・ガイド・実寸メモリすべてに一括で補正が掛かる。
+     - 右下の100mmメモリも #layer の中にあるので、
+       「メモリを測る＝実際の印刷精度を測る」ことになり、補正の検証も同時にできる。
+     - 補正係数は掛け合わせ式: 新係数 = 旧係数 × (100 / 実測値)。
+       → 補正済みの紙を測って入力しても収束するだけで壊れない。
+     ============================================================ */
+
+  :root{
+    --bg:#eceae4; --panel:#fff; --ink:#242320; --sub:#6c675e; --line:#d9d5cc;
+    --accent:#2b6f6a; --accent-ink:#fff; --warn:#9a5b00; --warn-bg:#fdf3e2;
+    --field:#f7f5f0; --radius:10px;
+    --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:var(--sans);color:var(--ink);background:var(--bg);-webkit-text-size-adjust:100%;}
+
+  .app{display:grid;grid-template-columns:340px 1fr;min-height:100vh;}
+  @media (max-width:820px){.app{grid-template-columns:1fr;}}
+
+  .panel{background:var(--panel);border-right:1px solid var(--line);padding:18px 16px 40px;overflow-y:auto;max-height:100vh;}
+  @media (max-width:820px){.panel{max-height:none;border-right:none;border-bottom:1px solid var(--line);}}
+
+  .brand{display:flex;align-items:baseline;gap:8px;margin:0 0 4px;}
+  .brand h1{font-size:17px;letter-spacing:.02em;margin:0;}
+  .brand .tag{font-size:11px;color:var(--sub);}
+  .lede{font-size:12px;color:var(--sub);line-height:1.6;margin:2px 0 14px;}
+
+  details.sec{border:1px solid var(--line);border-radius:var(--radius);margin-bottom:10px;background:var(--panel);overflow:hidden;}
+  details.sec>summary{list-style:none;cursor:pointer;padding:11px 12px;font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center;background:#faf9f6;}
+  details.sec>summary::-webkit-details-marker{display:none;}
+  details.sec>summary .chev{color:var(--sub);font-size:11px;transition:transform .15s;}
+  details.sec[open]>summary .chev{transform:rotate(90deg);}
+  .sec-body{padding:12px;border-top:1px solid var(--line);}
+
+  .row{display:flex;gap:8px;align-items:center;margin-bottom:9px;}
+  .row:last-child{margin-bottom:0;}
+  label.fld{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--sub);flex:1;}
+  label.fld .lab{font-weight:600;color:var(--ink);}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .grid4{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+
+  input[type=number],input[type=text],select{font-family:var(--mono);font-size:14px;padding:8px 9px;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--ink);width:100%;-webkit-appearance:none;}
+  input[type=number]:focus,input[type=text]:focus,select:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent;}
+  input[type=color]{width:40px;height:34px;padding:0;border:1px solid var(--line);border-radius:8px;background:none;}
+
+  .btn{font-family:var(--sans);font-size:13px;font-weight:600;padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--field);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;}
+  .btn:hover{background:#efece5;}
+  .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);}
+  .btn.primary:hover{filter:brightness(1.06);}
+  .btn.full{width:100%;}
+  .btn.sm{font-size:12px;padding:6px 9px;}
+  .btn.ghost{background:transparent;}
+  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
+  .seg button{font-family:var(--sans);font-size:12px;font-weight:600;padding:7px 12px;border:none;background:var(--field);color:var(--sub);cursor:pointer;}
+  .seg button.on{background:var(--accent);color:#fff;}
+
+  .toggle{display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;}
+  .toggle input{width:16px;height:16px;accent-color:var(--accent);}
+
+  .hint{font-size:11px;color:var(--sub);line-height:1.55;margin:6px 0 0;}
+  .stat{font-family:var(--mono);font-size:12px;color:var(--ink);background:var(--field);border:1px solid var(--line);border-radius:8px;padding:8px 10px;line-height:1.7;}
+  .stat b{color:var(--accent);font-size:14px;}
+
+  .notice{font-size:11.5px;line-height:1.6;background:var(--warn-bg);color:var(--warn);border:1px solid #f0dcb6;border-radius:8px;padding:9px 10px;margin-bottom:10px;}
+  .notice.calm{background:#eef3f2;color:#2c4a47;border-color:#cfe0dd;}
+
+  .imglist{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
+  .thumb{position:relative;width:60px;height:60px;border-radius:8px;overflow:hidden;border:2px solid var(--line);background:#f0eee8;cursor:pointer;}
+  .thumb.on{border-color:var(--accent);}
+  .thumb img{width:100%;height:100%;object-fit:cover;}
+  .thumb .x{position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:12px;line-height:18px;text-align:center;border:none;cursor:pointer;}
+  .thumb .apply{position:absolute;bottom:2px;left:2px;right:2px;font-size:9px;padding:2px 0;border:none;background:rgba(43,111,106,.9);color:#fff;border-radius:4px;cursor:pointer;}
+
+  #adjustSec .selinfo{font-size:11px;color:var(--sub);margin-bottom:8px;}
+  .padgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;max-width:150px;margin:0 auto;}
+  .padgrid .btn{padding:8px 0;}
+
+  .stage{padding:20px;display:flex;flex-direction:column;align-items:center;gap:14px;overflow:auto;}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;align-items:center;width:100%;position:sticky;top:0;z-index:5;}
+  .toolbar .tbhint{font-size:11px;color:var(--sub);width:100%;text-align:center;}
+  .viewport{position:relative;margin:0 auto;}
+  #paper{position:absolute;top:0;left:0;transform-origin:0 0;transform:scale(var(--pscale,1));background:#fff;box-shadow:0 6px 24px rgba(0,0,0,.14);}
+  #layer{position:absolute;top:0;left:0;width:100%;height:100%;transform-origin:0 0;}
+  body.preview-correct #layer{transform:var(--corr,none);}
+
+  .circle{position:absolute;}
+  .circle .clip{position:absolute;inset:0;border-radius:50%;overflow:hidden;background:#f4f2ec;}
+  .circle .clip img{position:absolute;left:50%;top:50%;transform-origin:center center;will-change:transform;-webkit-user-drag:none;user-select:none;pointer-events:none;}
+  .circle .guide{position:absolute;inset:0;border-radius:50%;box-sizing:border-box;pointer-events:none;}
+  .circle .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#c3bdb0;font-size:10px;}
+  .circle.sel .clip{outline:2px solid var(--accent);outline-offset:1px;}
+  .circle .selbadge{position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:var(--accent);color:#fff;font-size:9px;padding:1px 6px;border-radius:8px;white-space:nowrap;}
+  .circle:not(.sel) .selbadge{display:none;}
+
+  /* 右下の100mm実寸メモリ（補正レイヤー内）*/
+  .ruler{position:absolute;pointer-events:none;}
+  .ruler .ln{position:absolute;background:#3a3a3a;}
+  .ruler .tk{position:absolute;background:#3a3a3a;}
+  .ruler .lb{position:absolute;font-family:var(--mono);font-size:2.6mm;color:#3a3a3a;white-space:nowrap;}
+
+  @media print{
+    html,body{background:#fff;margin:0;padding:0;}
+    .no-print{display:none !important;}
+    .app{display:block;}
+    .stage{padding:0;margin:0;display:block;overflow:visible;}
+    .viewport{position:static;width:auto !important;height:auto !important;margin:0;}
+    #paper{position:fixed;left:0;top:0;transform:none !important;box-shadow:none !important;overflow:hidden;}
+    #layer{transform:var(--corr,none) !important;}
+  }
+</style>
+</head>
+<body>
+<style id="pageRule">@page{size:210mm 297mm;margin:0;}</style>
+
+<div class="app">
+  <aside class="panel no-print">
+    <div class="brand"><h1>A4 円形印刷ツール</h1><span class="tag">実寸印刷</span></div>
+    <p class="lede">指定した直径の円を、印刷後の紙面でも正確な寸法で出力します。右下の100mm目盛りを測って、ずれていれば補正してください。</p>
+
+    <div id="noticeArea"></div>
+
+    <details class="sec" open>
+      <summary>画像 <span class="chev">›</span></summary>
+      <div class="sec-body">
+        <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
+        <button class="btn full" id="addImgBtn">画像を追加</button>
+        <div class="imglist" id="imgList"></div>
+        <p class="hint">サムネイルをクリックすると、その画像をすべての円に割り当てます。JPEG / PNG / WebP 対応。</p>
+      </div>
+    </details>
+
+    <details class="sec" open>
+      <summary>円のサイズ <span class="chev">›</span></summary>
+      <div class="sec-body">
+        <label class="fld"><span class="lab">直径（mm）</span><input id="diameter" type="number" min="5" max="290" step="0.1" value="60.0"></label>
+        <p class="hint">小数入力可（例: 59.5 / 62.5）。ガイド線の外周がこの直径と一致します。</p>
+      </div>
+    </details>
+
+    <details class="sec" open>
+      <summary>用紙と配置 <span class="chev">›</span></summary>
+      <div class="sec-body">
+        <div class="row">
+          <span style="font-size:11px;color:var(--sub);font-weight:600;">用紙方向</span>
+          <div class="seg" id="orientSeg" style="margin-left:auto;">
+            <button data-v="portrait" class="on">縦</button><button data-v="landscape">横</button>
+          </div>
+        </div>
+        <div class="grid4">
+          <label class="fld"><span class="lab">上余白</span><input id="mt" type="number" min="0" step="0.5" value="10"></label>
+          <label class="fld"><span class="lab">下余白</span><input id="mb" type="number" min="0" step="0.5" value="10"></label>
+          <label class="fld"><span class="lab">左余白</span><input id="ml" type="number" min="0" step="0.5" value="10"></label>
+          <label class="fld"><span class="lab">右余白</span><input id="mr" type="number" min="0" step="0.5" value="10"></label>
+        </div>
+        <div class="grid2" style="margin-top:9px;">
+          <label class="fld"><span class="lab">横の間隔</span><input id="gx" type="number" min="0" step="0.5" value="4"></label>
+          <label class="fld"><span class="lab">縦の間隔</span><input id="gy" type="number" min="0" step="0.5" value="4"></label>
+        </div>
+        <div class="stat" id="statBox" style="margin-top:11px;">配置: 計算中…</div>
+      </div>
+    </details>
+
+    <details class="sec">
+      <summary>カットガイド <span class="chev">›</span></summary>
+      <div class="sec-body">
+        <label class="toggle" style="margin-bottom:10px;"><input type="checkbox" id="guideOn" checked> ガイド線を表示</label>
+        <div class="row"><span style="font-size:11px;color:var(--sub);font-weight:600;">線種</span>
+          <div class="seg" id="guideStyleSeg" style="margin-left:auto;"><button data-v="dashed" class="on">点線</button><button data-v="solid">実線</button></div>
+        </div>
+        <div class="row"><span style="font-size:11px;color:var(--sub);font-weight:600;">太さ</span>
+          <div class="seg" id="guideWeightSeg" style="margin-left:auto;"><button data-v="0.2" class="on">細</button><button data-v="0.4">中</button><button data-v="0.7">太</button></div>
+        </div>
+        <div class="row"><span style="font-size:11px;color:var(--sub);font-weight:600;">色</span>
+          <input type="color" id="guideColor" value="#b0b0b0" style="margin-left:auto;">
+        </div>
+      </div>
+    </details>
+
+    <details class="sec" open>
+      <summary>印刷補正 <span class="chev">›</span></summary>
+      <div class="sec-body">
+        <label class="toggle" style="margin-bottom:10px;"><input type="checkbox" id="rulerOn" checked> 右下に100mm実寸メモリを印刷</label>
+
+        <label class="fld" style="margin-bottom:8px;"><span class="lab">プリンタープロファイル</span><select id="profileSel"></select></label>
+        <div class="row">
+          <button class="btn sm" id="addProfileBtn">＋ 追加</button>
+          <button class="btn sm" id="renameProfileBtn">名前変更</button>
+          <button class="btn sm ghost" id="delProfileBtn">削除</button>
+        </div>
+
+        <div class="stat" id="corrStat" style="margin:10px 0;"></div>
+
+        <p class="hint" style="margin-top:0;">印刷して右下の目盛りを定規で測り、実測値（mm）を入力してください。100mmちょうどなら補正不要です。</p>
+        <div class="grid2" style="margin-top:8px;">
+          <label class="fld"><span class="lab">横 実測（mm）</span><input id="measX" type="number" min="50" max="150" step="0.1" placeholder="例: 99.0"></label>
+          <label class="fld"><span class="lab">縦 実測（mm）</span><input id="measY" type="number" min="50" max="150" step="0.1" placeholder="例: 101.0"></label>
+        </div>
+        <button class="btn primary full" id="applyCorrBtn" style="margin-top:8px;">この実測値で補正</button>
+        <div class="row" style="margin-top:8px;">
+          <button class="btn sm" id="resetCorrBtn">補正をリセット</button>
+          <label class="toggle" style="margin-left:auto;"><input type="checkbox" id="previewCorrChk"> プレビューに反映</label>
+        </div>
+        <p class="hint">補正は「実測値で補正」を押すたびに掛け合わされ、100mmへ近づきます。ずれていれば測って入れ直すだけでOKです。</p>
+      </div>
+    </details>
+
+    <details class="sec" id="adjustSec">
+      <summary>選択中の円を調整 <span class="chev">›</span></summary>
+      <div class="sec-body">
+        <p class="selinfo" id="selInfo">プレビューで円をクリック / タップすると、その円の画像を調整できます。</p>
+        <label class="fld" style="margin-bottom:9px;"><span class="lab">この円の画像</span><select id="cellImgSel"></select></label>
+        <div class="row"><span style="font-size:11px;color:var(--sub);font-weight:600;">拡大 / 縮小</span>
+          <div style="margin-left:auto;display:flex;gap:6px;"><button class="btn sm" data-adj="zoomout">－</button><button class="btn sm" data-adj="zoomin">＋</button></div>
+        </div>
+        <div class="row"><span style="font-size:11px;color:var(--sub);font-weight:600;">回転</span>
+          <div style="margin-left:auto;display:flex;gap:6px;"><button class="btn sm" data-adj="rotl">⟲ 15°</button><button class="btn sm" data-adj="rotr">15° ⟳</button></div>
+        </div>
+        <div style="margin:8px 0;"><span style="font-size:11px;color:var(--sub);font-weight:600;">位置</span>
+          <div class="padgrid" style="margin-top:6px;">
+            <span></span><button class="btn sm" data-adj="up">▲</button><span></span>
+            <button class="btn sm" data-adj="left">◀</button><button class="btn sm" data-adj="reset">中央</button><button class="btn sm" data-adj="right">▶</button>
+            <span></span><button class="btn sm" data-adj="down">▼</button><span></span>
+          </div>
+        </div>
+        <p class="hint">プレビュー上で直接ドラッグ / ピンチ操作もできます（PC・iPad対応）。</p>
+        <button class="btn full" id="applyAllBtn" style="margin-top:6px;">この画像と調整をすべての円へ適用</button>
+      </div>
+    </details>
+
+    <div style="margin-top:14px;display:flex;gap:8px;">
+      <button class="btn" id="resetAllBtn" style="flex:1;">設定リセット</button>
+    </div>
+  </aside>
+
+  <main class="stage">
+    <div class="toolbar no-print">
+      <button class="btn" id="tbAddImg">画像追加</button>
+      <button class="btn primary" id="tbPrint">印刷 / PDF保存</button>
+      <div class="tbhint">印刷ダイアログの送信先で「PDFに保存」を選ぶとPDF化できます。倍率は必ず<b>100%</b>のままにしてください。</div>
+    </div>
+    <div class="viewport" id="viewport">
+      <div id="paper"><div id="layer"></div></div>
+    </div>
+  </main>
+</div>
+
+<script>
+"use strict";
+(function(){
+  const PX_PER_MM = 96/25.4;
+  const A4 = {w:210, h:297};
+  const LS_KEY = "a4circleprint.v2";
+  const RULER_INSET = 8;   // 右下メモリの端からの余白(mm)。補正で数%伸びても紙内に収める。
+
+  const $ = s => document.querySelector(s);
+  const el = {
+    paper:$("#paper"), layer:$("#layer"), viewport:$("#viewport"), pageRule:$("#pageRule"),
+    stat:$("#statBox"), corrStat:$("#corrStat"), imgList:$("#imgList"), fileInput:$("#fileInput"),
+    profileSel:$("#profileSel"), cellImgSel:$("#cellImgSel"), selInfo:$("#selInfo"), notice:$("#noticeArea"),
+  };
+
+  function defaults(){
+    return {
+      orientation:"portrait", diameter:60.0,
+      margin:{t:10,b:10,l:10,r:10}, gap:{x:4,y:4},
+      guide:{on:true, style:"dashed", weight:0.2, color:"#b0b0b0"},
+      ruler:true, previewCorrect:false,
+    };
+  }
+  let S = defaults();
+  let images = [];
+  let defaultImageId = null;
+  let cells = [];
+  let selected = -1;
+  let layout = {cols:0, rows:0, total:0, positions:[]};
+  let pscale = 1;
+
+  // 補正: 係数を直接保持（掛け合わせ式）
+  let corr = { activeId:"none", profiles:[ {id:"none", name:"補正なし", fx:1, fy:1} ] };
+
+  function save(){ try{ localStorage.setItem(LS_KEY, JSON.stringify({S, corr})); }catch(e){} }
+  function load(){
+    try{
+      const raw = localStorage.getItem(LS_KEY); if(!raw) return;
+      const d = JSON.parse(raw);
+      if(d.S) S = Object.assign(defaults(), d.S, {
+        margin:Object.assign(defaults().margin, d.S.margin||{}),
+        gap:Object.assign(defaults().gap, d.S.gap||{}),
+        guide:Object.assign(defaults().guide, d.S.guide||{}),
+      });
+      if(d.corr && Array.isArray(d.corr.profiles) && d.corr.profiles.length){
+        corr = d.corr;
+        if(!corr.profiles.some(p=>p.id===corr.activeId)) corr.activeId = corr.profiles[0].id;
+      }
+    }catch(e){}
+  }
+
+  function activeProfile(){ return corr.profiles.find(p=>p.id===corr.activeId) || corr.profiles[0]; }
+  function factors(){ const p=activeProfile(); return {fx:(p&&p.fx>0?p.fx:1), fy:(p&&p.fy>0?p.fy:1)}; }
+
+  function paperMM(){ return S.orientation==="portrait" ? {w:A4.w,h:A4.h} : {w:A4.h,h:A4.w}; }
+
+  function computeLayout(){
+    const pm = paperMM(); const d = S.diameter;
+    const usableW = pm.w - S.margin.l - S.margin.r;
+    const usableH = pm.h - S.margin.t - S.margin.b;
+    let cols=0, rows=0;
+    if(d>0 && usableW>=d) cols = Math.floor((usableW + S.gap.x)/(d + S.gap.x));
+    if(d>0 && usableH>=d) rows = Math.floor((usableH + S.gap.y)/(d + S.gap.y));
+    cols=Math.max(0,cols); rows=Math.max(0,rows);
+    const positions=[];
+    for(let j=0;j<rows;j++) for(let i=0;i<cols;i++)
+      positions.push({left:S.margin.l + i*(d+S.gap.x), top:S.margin.t + j*(d+S.gap.y)});
+    layout={cols,rows,total:cols*rows,positions};
+  }
+
+  function syncCells(){
+    const total=layout.total; const next=[];
+    for(let i=0;i<total;i++){
+      next[i] = cells[i] || {imageId:defaultImageId, tx:0, ty:0, scale:1, rot:0};
+      if(next[i].imageId && !images.some(im=>im.id===next[i].imageId)) next[i].imageId = defaultImageId;
+    }
+    cells=next; if(selected>=total) selected=-1;
+  }
+
+  function computePscale(){
+    const pm=paperMM();
+    const paperWpx=pm.w*PX_PER_MM, paperHpx=pm.h*PX_PER_MM;
+    const availW=Math.max(200, el.viewport.parentElement.clientWidth-40);
+    const availH=Math.max(300, window.innerHeight-140);
+    pscale=Math.min(availW/paperWpx, availH/paperHpx, 1.4);
+    S._pscale=pscale;
+    el.paper.style.setProperty("--pscale", pscale);
+    el.viewport.style.width=(paperWpx*pscale)+"px";
+    el.viewport.style.height=(paperHpx*pscale)+"px";
+  }
+
+  function render(){
+    computeLayout(); syncCells();
+    const pm=paperMM();
+    el.paper.style.width=pm.w+"mm"; el.paper.style.height=pm.h+"mm";
+    el.pageRule.textContent="@page{size:"+pm.w+"mm "+pm.h+"mm;margin:0;}";
+
+    const f=factors();
+    el.layer.style.setProperty("--corr","scaleX("+f.fx+") scaleY("+f.fy+")");
+    document.body.classList.toggle("preview-correct", !!S.previewCorrect);
+    computePscale();
+
+    el.layer.innerHTML="";
+    const d=S.diameter;
+    layout.positions.forEach((pos,idx)=>{
+      const c=document.createElement("div");
+      c.className="circle"+(idx===selected?" sel":"");
+      c.style.left=pos.left+"mm"; c.style.top=pos.top+"mm"; c.style.width=d+"mm"; c.style.height=d+"mm";
+      c.dataset.idx=idx;
+      const clip=document.createElement("div"); clip.className="clip";
+      const cell=cells[idx]; const img=images.find(im=>im.id===cell.imageId);
+      if(img){ const im=document.createElement("img"); im.src=img.src; applyImgStyle(im,img,cell,d); clip.appendChild(im); }
+      else{ const e=document.createElement("div"); e.className="empty"; e.textContent="画像なし"; clip.appendChild(e); }
+      c.appendChild(clip);
+      if(S.guide.on){ const g=document.createElement("div"); g.className="guide"; g.style.border=S.guide.weight+"mm "+S.guide.style+" "+S.guide.color; c.appendChild(g); }
+      const badge=document.createElement("div"); badge.className="selbadge"; badge.textContent="調整中"; c.appendChild(badge);
+      attachGestures(c,idx);
+      el.layer.appendChild(c);
+    });
+
+    if(S.ruler) addRuler(pm);
+
+    updateStat(); updateCorrStat(); updateNotice(); updateSelUI();
+  }
+
+  function addRuler(pm){
+    // 右下コーナーを基点に、横100mm・縦100mmのL字メモリ（補正レイヤー内 = 実際の印刷寸法）
+    const ox = pm.w - RULER_INSET;   // 右端X
+    const oy = pm.h - RULER_INSET;   // 下端Y
+    const ruler=document.createElement("div"); ruler.className="ruler";
+    ruler.style.left="0"; ruler.style.top="0"; ruler.style.width="100%"; ruler.style.height="100%";
+
+    function line(x,y,w,h){ const n=document.createElement("div"); n.className="ln"; n.style.left=x+"mm"; n.style.top=y+"mm"; n.style.width=w+"mm"; n.style.height=h+"mm"; ruler.appendChild(n); }
+    function tick(x,y,dir){ const n=document.createElement("div"); n.className="tk"; if(dir==="v"){n.style.left=x+"mm";n.style.top=(y-2)+"mm";n.style.width="0.3mm";n.style.height="4mm";}else{n.style.left=(x-2)+"mm";n.style.top=y+"mm";n.style.width="4mm";n.style.height="0.3mm";} ruler.appendChild(n); }
+
+    // 横100mm（下端に沿って、右端から左へ）※文字ラベルは入れない（円と重なるため）
+    const hx0 = ox-100, hx1 = ox;
+    line(hx0, oy, 100, 0.3);
+    tick(hx0, oy, "v"); tick(hx1, oy, "v");
+
+    // 縦100mm（右端に沿って、下端から上へ）
+    const vy0 = oy-100, vy1 = oy;
+    line(ox, vy0, 0.3, 100);
+    tick(ox, vy0, "h"); tick(ox, vy1, "h");
+
+    el.layer.appendChild(ruler);
+  }
+
+  function applyImgStyle(im,imgObj,cell,d){
+    const r=imgObj.aspect||1; let w,h;
+    if(r>=1){h=d;w=d*r;}else{w=d;h=d/r;}
+    im.style.width=w+"mm"; im.style.height=h+"mm";
+    im.style.transform="translate(-50%,-50%) translate("+cell.tx+"mm,"+cell.ty+"mm) rotate("+cell.rot+"deg) scale("+cell.scale+")";
+  }
+  function refreshCell(idx){
+    const node=el.layer.querySelector('.circle[data-idx="'+idx+'"] .clip img');
+    const cell=cells[idx]; const img=images.find(im=>im.id===cell.imageId);
+    if(node&&img) applyImgStyle(node,img,cell,S.diameter);
+  }
+
+  function updateStat(){ el.stat.innerHTML="横 <b>"+layout.cols+"</b> 個 ／ 縦 <b>"+layout.rows+"</b> 個 ／ 合計 <b>"+layout.total+"</b> 個"; }
+  function updateCorrStat(){
+    const f=factors();
+    let html="<div>横補正係数: <b style='color:var(--accent)'>"+f.fx.toFixed(5)+"</b></div><div>縦補正係数: <b style='color:var(--accent)'>"+f.fy.toFixed(5)+"</b></div>";
+    if(Math.abs(f.fx-1)<1e-9 && Math.abs(f.fy-1)<1e-9) html+="<div style='color:var(--sub);margin-top:3px;'>補正なし（等倍）</div>";
+    el.corrStat.innerHTML=html;
+  }
+  function updateNotice(){
+    let html='<div class="notice">正確な寸法で印刷するため、プリンター（またはPDF保存）の倍率は必ず<b>100%</b>にしてください。「用紙に合わせる」等の自動縮小はオフ。</div>';
+    const f=factors();
+    if(Math.abs(f.fx-1)<1e-9 && Math.abs(f.fy-1)<1e-9)
+      html+='<div class="notice calm">まず一度印刷し、右下の100mm目盛りを定規で測ってください。ずれていれば実測値を入力して補正します。</div>';
+    el.notice.innerHTML=html;
+  }
+
+  // 画像
+  function addFiles(files){
+    const arr=Array.from(files).filter(f=>/^image\/(jpeg|png|webp)$/.test(f.type));
+    let remaining=arr.length; if(!remaining) return;
+    arr.forEach(f=>{
+      const reader=new FileReader();
+      reader.onload=ev=>{
+        const src=ev.target.result; const probe=new Image();
+        probe.onload=()=>{
+          const id="img_"+Date.now()+"_"+Math.random().toString(36).slice(2,7);
+          images.push({id,src,aspect:probe.naturalWidth/probe.naturalHeight});
+          const first=images.length===1;
+          if(!defaultImageId) defaultImageId=id;
+          if(first) cells.forEach(c=>{ if(!c.imageId) c.imageId=id; });
+          remaining--; renderImgList(); if(remaining===0) render();
+        };
+        probe.src=src;
+      };
+      reader.readAsDataURL(f);
+    });
+  }
+  function renderImgList(){
+    el.imgList.innerHTML="";
+    images.forEach(img=>{
+      const t=document.createElement("div"); t.className="thumb"+(img.id===defaultImageId?" on":"");
+      const im=document.createElement("img"); im.src=img.src; t.appendChild(im);
+      const x=document.createElement("button"); x.className="x"; x.textContent="×"; x.title="この画像を削除";
+      x.onclick=e=>{e.stopPropagation();removeImage(img.id);}; t.appendChild(x);
+      const ap=document.createElement("button"); ap.className="apply"; ap.textContent="全円へ";
+      ap.onclick=e=>{e.stopPropagation();assignAll(img.id);}; t.appendChild(ap);
+      t.onclick=()=>{ defaultImageId=img.id; assignAll(img.id); };
+      el.imgList.appendChild(t);
+    });
+    fillCellImgSelect();
+  }
+  function assignAll(id){ defaultImageId=id; cells.forEach(c=>{c.imageId=id;}); renderImgList(); render(); }
+  function removeImage(id){
+    images=images.filter(im=>im.id!==id);
+    if(defaultImageId===id) defaultImageId=images.length?images[0].id:null;
+    cells.forEach(c=>{ if(c.imageId===id) c.imageId=defaultImageId; });
+    renderImgList(); render();
+  }
+  function fillCellImgSelect(){
+    el.cellImgSel.innerHTML="";
+    const none=document.createElement("option"); none.value=""; none.textContent="（画像なし）"; el.cellImgSel.appendChild(none);
+    images.forEach((img,i)=>{ const o=document.createElement("option"); o.value=img.id; o.textContent="画像 "+(i+1); el.cellImgSel.appendChild(o); });
+    if(selected>=0 && cells[selected]) el.cellImgSel.value=cells[selected].imageId||"";
+  }
+
+  // 選択・調整
+  function selectCell(idx){
+    selected=idx;
+    document.querySelectorAll(".circle").forEach(c=>c.classList.toggle("sel", +c.dataset.idx===idx));
+    const sec=$("#adjustSec"); if(sec && !sec.open) sec.open=true;
+    updateSelUI();
+  }
+  function updateSelUI(){
+    if(selected<0 || !cells[selected]) el.selInfo.textContent="プレビューで円をクリック / タップすると、その円の画像を調整できます。";
+    else{ const c=cells[selected]; el.selInfo.textContent="選択中: "+(selected+1)+" 番目 ／ 倍率 "+c.scale.toFixed(2)+" ／ 回転 "+Math.round(c.rot)+"°"; }
+    fillCellImgSelect();
+  }
+  const MOVE_MM=1.5, ZOOM_STEP=0.1, ROT_STEP=15;
+  function adjust(kind){
+    if(selected<0) return; const c=cells[selected];
+    switch(kind){
+      case "zoomin": c.scale=Math.min(8,c.scale*(1+ZOOM_STEP)); break;
+      case "zoomout": c.scale=Math.max(0.2,c.scale/(1+ZOOM_STEP)); break;
+      case "rotl": c.rot-=ROT_STEP; break;
+      case "rotr": c.rot+=ROT_STEP; break;
+      case "up": c.ty-=MOVE_MM; break;
+      case "down": c.ty+=MOVE_MM; break;
+      case "left": c.tx-=MOVE_MM; break;
+      case "right": c.tx+=MOVE_MM; break;
+      case "reset": c.tx=0;c.ty=0;c.scale=1;c.rot=0; break;
+    }
+    refreshCell(selected); updateSelUI();
+  }
+  function attachGestures(node,idx){
+    const pointers=new Map(); let start=null;
+    node.addEventListener("pointerdown",e=>{
+      selectCell(idx); node.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+      if(pointers.size===1){ const c=cells[idx]; start={mode:"pan",x:e.clientX,y:e.clientY,tx:c.tx,ty:c.ty}; }
+      else if(pointers.size===2){
+        const p=[...pointers.values()];
+        const dist=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);
+        const ang=Math.atan2(p[1].y-p[0].y,p[1].x-p[0].x)*180/Math.PI;
+        const c=cells[idx]; start={mode:"pinch",dist,ang,scale:c.scale,rot:c.rot};
+      }
+      e.preventDefault();
+    });
+    node.addEventListener("pointermove",e=>{
+      if(!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+      const c=cells[idx];
+      if(start&&start.mode==="pan"&&pointers.size===1){
+        const k=1/(pscale*PX_PER_MM);
+        c.tx=start.tx+(e.clientX-start.x)*k; c.ty=start.ty+(e.clientY-start.y)*k; refreshCell(idx);
+      }else if(start&&start.mode==="pinch"&&pointers.size>=2){
+        const p=[...pointers.values()];
+        const dist=Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);
+        const ang=Math.atan2(p[1].y-p[0].y,p[1].x-p[0].x)*180/Math.PI;
+        c.scale=Math.min(8,Math.max(0.2,start.scale*(dist/start.dist)));
+        c.rot=start.rot+(ang-start.ang); refreshCell(idx);
+      }
+    });
+    function up(e){ if(pointers.has(e.pointerId)) pointers.delete(e.pointerId); if(pointers.size<2) start=null; updateSelUI(); }
+    node.addEventListener("pointerup",up); node.addEventListener("pointercancel",up);
+    node.addEventListener("wheel",e=>{
+      selectCell(idx); const c=cells[idx];
+      c.scale=Math.min(8,Math.max(0.2,c.scale*(e.deltaY<0?1.08:1/1.08)));
+      refreshCell(idx); updateSelUI(); e.preventDefault();
+    },{passive:false});
+  }
+
+  // 印刷 / PDF
+  function doPrint(){ window.print(); }
+
+  // プロファイル
+  function fillProfileSelect(){
+    el.profileSel.innerHTML="";
+    corr.profiles.forEach(p=>{
+      const o=document.createElement("option"); o.value=p.id;
+      o.textContent = p.id==="none" ? p.name : (p.name+" ("+p.fx.toFixed(3)+"/"+p.fy.toFixed(3)+")");
+      el.profileSel.appendChild(o);
+    });
+    el.profileSel.value=corr.activeId;
+  }
+
+  function num(id,def){ const v=parseFloat($("#"+id).value); return isNaN(v)?def:v; }
+  function clamp(v,a,b){ return Math.min(b,Math.max(a,v)); }
+  function setSeg(sel,val){ document.querySelectorAll(sel+" button").forEach(b=>b.classList.toggle("on",b.dataset.v===val)); }
+  function seg(sel,cb){ document.querySelectorAll(sel+" button").forEach(b=>{ b.onclick=()=>{ setSeg(sel,b.dataset.v); cb(b.dataset.v); }; }); }
+
+  function bindUI(){
+    $("#diameter").value=S.diameter;
+    $("#mt").value=S.margin.t; $("#mb").value=S.margin.b; $("#ml").value=S.margin.l; $("#mr").value=S.margin.r;
+    $("#gx").value=S.gap.x; $("#gy").value=S.gap.y;
+    $("#guideOn").checked=S.guide.on; $("#guideColor").value=S.guide.color;
+    $("#rulerOn").checked=S.ruler; $("#previewCorrChk").checked=S.previewCorrect;
+    setSeg("#orientSeg",S.orientation); setSeg("#guideStyleSeg",S.guide.style); setSeg("#guideWeightSeg",String(S.guide.weight));
+
+    $("#addImgBtn").onclick=()=>el.fileInput.click();
+    $("#tbAddImg").onclick=()=>el.fileInput.click();
+    el.fileInput.onchange=e=>{ addFiles(e.target.files); e.target.value=""; };
+
+    $("#diameter").oninput=()=>{ S.diameter=clamp(num("diameter",60),1,290); save(); render(); };
+    ["mt","mb","ml","mr"].forEach(k=>{ $("#"+k).oninput=()=>{ S.margin[k[1]]=Math.max(0,num(k,10)); save(); render(); }; });
+    $("#gx").oninput=()=>{ S.gap.x=Math.max(0,num("gx",4)); save(); render(); };
+    $("#gy").oninput=()=>{ S.gap.y=Math.max(0,num("gy",4)); save(); render(); };
+    seg("#orientSeg",v=>{ S.orientation=v; save(); render(); });
+
+    $("#guideOn").onchange=e=>{ S.guide.on=e.target.checked; save(); render(); };
+    seg("#guideStyleSeg",v=>{ S.guide.style=v; save(); render(); });
+    seg("#guideWeightSeg",v=>{ S.guide.weight=parseFloat(v); save(); render(); });
+    $("#guideColor").oninput=e=>{ S.guide.color=e.target.value; save(); render(); };
+
+    $("#rulerOn").onchange=e=>{ S.ruler=e.target.checked; save(); render(); };
+
+    fillProfileSelect();
+    el.profileSel.onchange=e=>{ corr.activeId=e.target.value; save(); render(); };
+    $("#addProfileBtn").onclick=addProfile;
+    $("#renameProfileBtn").onclick=renameProfile;
+    $("#delProfileBtn").onclick=delProfile;
+    $("#applyCorrBtn").onclick=applyCorrection;
+    $("#resetCorrBtn").onclick=resetCorrection;
+    $("#previewCorrChk").onchange=e=>{ S.previewCorrect=e.target.checked; save(); render(); };
+
+    $("#tbPrint").onclick=doPrint;
+
+    document.querySelectorAll("[data-adj]").forEach(b=>{ b.onclick=()=>adjust(b.dataset.adj); });
+    el.cellImgSel.onchange=e=>{ if(selected<0) return; cells[selected].imageId=e.target.value||null; render(); };
+    $("#applyAllBtn").onclick=()=>{
+      if(selected<0) return; const s=cells[selected];
+      cells.forEach(c=>{ c.imageId=s.imageId; c.tx=s.tx; c.ty=s.ty; c.scale=s.scale; c.rot=s.rot; });
+      if(s.imageId) defaultImageId=s.imageId; renderImgList(); render();
+    };
+    $("#resetAllBtn").onclick=resetAll;
+
+    window.addEventListener("resize",()=>computePscale());
+  }
+
+  // 補正（掛け合わせ式）
+  function applyCorrection(){
+    const mx=parseFloat($("#measX").value), my=parseFloat($("#measY").value);
+    const hasX=!isNaN(mx)&&mx>0, hasY=!isNaN(my)&&my>0;
+    if(!hasX && !hasY){ alert("横または縦の実測値（mm）を入力してください。"); return; }
+    let p=activeProfile();
+    if(p.id==="none"){
+      const id="prof_"+Date.now();
+      p={id,name:"プリンター"+(corr.profiles.length),fx:1,fy:1};
+      corr.profiles.push(p); corr.activeId=id;
+    }
+    if(hasX) p.fx *= 100/mx;
+    if(hasY) p.fy *= 100/my;
+    save(); fillProfileSelect(); render();
+    $("#measX").value=""; $("#measY").value="";
+    const f=factors();
+    alert("補正を更新しました。\n横補正係数 "+f.fx.toFixed(5)+" / 縦補正係数 "+f.fy.toFixed(5)+"\n\nもう一度印刷し、右下の目盛りが100mmになっているか確認してください。");
+  }
+  function resetCorrection(){
+    const p=activeProfile();
+    if(p.id==="none"){ alert("現在は「補正なし」です。"); return; }
+    if(!confirm("プロファイル「"+p.name+"」の補正をリセット（等倍に）しますか？")) return;
+    p.fx=1; p.fy=1; save(); fillProfileSelect(); render();
+  }
+  function addProfile(){
+    const name=prompt("プリンター名を入力してください（例: 自宅プリンター）","プリンター"+corr.profiles.length);
+    if(!name) return;
+    const id="prof_"+Date.now();
+    corr.profiles.push({id,name,fx:1,fy:1}); corr.activeId=id;
+    save(); fillProfileSelect(); render();
+  }
+  function renameProfile(){
+    const p=activeProfile();
+    if(p.id==="none"){ alert("「補正なし」は名前変更できません。"); return; }
+    const name=prompt("プリンター名",p.name); if(!name) return;
+    p.name=name; save(); fillProfileSelect(); updateCorrStat();
+  }
+  function delProfile(){
+    const p=activeProfile();
+    if(p.id==="none"){ alert("「補正なし」は削除できません。"); return; }
+    if(!confirm("プロファイル「"+p.name+"」を削除しますか？")) return;
+    corr.profiles=corr.profiles.filter(x=>x.id!==p.id); corr.activeId="none";
+    save(); fillProfileSelect(); render();
+  }
+
+  function resetAll(){
+    if(!confirm("配置・ガイド・画像調整を初期設定に戻します（読み込んだ画像と補正プロファイルは残ります）。よろしいですか？")) return;
+    S=defaults();
+    cells=cells.map(()=>({imageId:defaultImageId,tx:0,ty:0,scale:1,rot:0}));
+    selected=-1; save(); bindUI(); render();
+  }
+
+  load(); bindUI(); render();
+})();
+</script>
+</body>
+</html>
